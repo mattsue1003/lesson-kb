@@ -196,6 +196,11 @@ def main(paths):
     links = json.load(open(lf, encoding="utf-8")) if lf.exists() else {}
     for r in out:
         r["links"] = [{"url": l["url"], "conf": l.get("conf", "")} for l in links.get(r["id"], [])]
+        # 預覽圖：優先用教案網頁截圖（tools/shoot_sites.py），其次臉書貼文縮圖
+        if r["links"] and "github.io/" in r["links"][0]["url"]:
+            shot = "images/web-" + r["links"][0]["url"].split("github.io/")[1].strip("/").replace("/", "_") + ".jpg"
+            if (HERE / shot).exists():
+                r["img"] = shot
     out.sort(key=lambda r: r["date"], reverse=True)
     # 重發的同一份教案（標題相同）合併成一筆，保留最新一次，記下其他發文日期
     merged, by_title = [], {}
