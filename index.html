@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>教案知識庫</title>
+<meta name="description" content="鍾孟修職能治療師歷年臉書教案整理：搜尋、篩選、分類與再應用">
+<link rel="stylesheet" href="app.css?v=2">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <h1>教案知識庫</h1>
+    <p class="sub">鍾孟修 職能治療師・臉書教案與活動素材整理</p>
+  </div>
+  <div class="searchwrap">
+    <input id="q" type="search" placeholder="搜尋教案、教具、主題、留言關鍵字…" autocomplete="off">
+  </div>
+</header>
+
+<div class="layout">
+  <aside id="facets" class="facets" aria-label="篩選"></aside>
+  <main>
+    <div class="toolbar">
+      <button id="toggleFacets" class="btn ghost only-mobile">篩選</button>
+      <span id="count" class="count"></span>
+      <div id="chips" class="chips"></div>
+      <div class="spacer"></div>
+      <label class="inline">排序
+        <select id="sort">
+          <option value="new">新到舊</option>
+          <option value="old">舊到新</option>
+          <option value="rel">相關度</option>
+        </select>
+      </label>
+      <div class="seg" role="group" aria-label="檢視">
+        <button data-view="cards" class="on">卡片</button>
+        <button data-view="table">列表</button>
+      </div>
+      <button id="export" class="btn ghost">匯出 CSV</button>
+    </div>
+    <div id="results"></div>
+    <div id="more" class="more"></div>
+  </main>
+</div>
+
+<dialog id="detail"><div id="detailBody"></div></dialog>
+
+<script src="data.js?v=2"></script>
+<script src="app.js?v=2"></script>
+<script src="https://mattsue1003.github.io/oth-report-button/report.js" data-site="教案知識庫" defer></script>
+<script>
+window.addEventListener('load',function(){
+  (function shrink(n){
+    var host=document.querySelector('[data-oth-report]');
+    if(!host||!host.shadowRoot){if(n<20)setTimeout(function(){shrink(n+1)},300);return}
+    var s=document.createElement('style');
+    s.textContent='.fab{left:14px!important;right:auto!important;bottom:14px!important;width:34px!important;height:34px!important;min-width:0!important;padding:0!important;gap:0!important;justify-content:center!important;border-radius:50%!important;overflow:hidden!important;font-size:0!important;white-space:nowrap!important;opacity:.75}.fab svg{width:16px!important;height:16px!important;flex:none;margin:0!important}@media (hover:hover){.fab:hover{width:auto!important;padding:0 14px!important;gap:6px!important;font-size:13px!important;border-radius:99px!important;opacity:1}}';
+    host.shadowRoot.appendChild(s);
+  })(0);
+});
+</script>
+</body>
+</html>
