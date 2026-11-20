@@ -112,6 +112,7 @@ def load_csv(p):
             "date": f"{m[3]}年{int(m[1])}月{int(m[2])}日" if m else "",
             "href": x.get("永久連結", ""),
             "post_type": x.get("貼文類型", ""),
+            "post_id": x.get("貼文編號", ""),
             "imgs": [],
         })
     return out
@@ -184,12 +185,17 @@ def main(paths):
             "truncated": bool(x.get("truncated")),
             "keyword": keyword(text),
             "href": x.get("href", "") if "story_fbid" in x.get("href", "") or "/reel/" in x.get("href", "") or "/videos/" in x.get("href", "") or "fbid=" in x.get("href", "") else "",
-            "img": (x.get("imgs") or [""])[0],
+            # 只用存在 images/ 的縮圖；臉書 CDN 網址會過期，不再直接引用
+            "img": f"images/{x['post_id']}.jpg" if x.get("post_id") and (HERE / "images" / f"{x['post_id']}.jpg").exists() else "",
             "text": text,
         })
+    # 只留教案；非教案貼文（公告、文章、個人分享）不放進知識庫
+    out = [r for r in out if r["lesson"]]
+    # 教案網頁連結：links.json（貼文 id → 對應的 GitHub Pages 網頁，由 Claude 比對網站標題產生）
+    lf = HERE / "links.json"
+    links = json.load(open(lf, encoding="utf-8")) if lf.exists() else {}
     for r in out:
-        if not r["lesson"]:
-            r["formats"] = []  # 非教案貼文的形式欄是 subagent 填的佔位值
+        r["links"] = [{"url": l["url"], "conf": l.get("conf", "")} for l in links.get(r["id"], [])]
     out.sort(key=lambda r: r["date"], reverse=True)
     # 重發的同一份教案（標題相同）合併成一筆，保留最新一次，記下其他發文日期
     merged, by_title = [], {}
@@ -210,6 +216,7 @@ def main(paths):
         (HERE / "enrich" / "in" / "todo.json").write_text(json.dumps(todo, ensure_ascii=False), encoding="utf-8")
         print(f"未分類 {len(todo)} 篇 → enrich/in/todo.json")
     n_l = sum(r["lesson"] for r in out)
+    print(f"with_web={sum(bool(r['links']) for r in out)}")
     print(f"posts={len(out)} lessons={n_l} truncated={sum(r['truncated'] for r in out)} "
           f"undated={sum(not r['date'] for r in out)} with_link={sum(bool(r['href']) for r in out)}")
 

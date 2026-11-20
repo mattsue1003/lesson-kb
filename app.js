@@ -1,6 +1,8 @@
 (function(){
 'use strict';
-const DATA = (window.KB_DATA || []).map((r, i) => ({...r, _i: i, year: (r.date || '').slice(0, 4) || '未知'}));
+const DATA = (window.KB_DATA || []).map((r, i) => ({...r, _i: i, year: (r.date || '').slice(0, 4) || '未知',
+  links: r.links || [], web: (r.links && r.links.length) ? '有教案網頁' : '只有臉書貼文'}));
+const host = u => { try{ const x = new URL(u); return x.host + x.pathname.replace(/\/$/, ''); }catch(e){ return u; } };
 const $ = s => document.querySelector(s);
 const store = {
   get(k, d){ try{ const v = localStorage.getItem('lessonkb.' + k); return v ? JSON.parse(v) : d; }catch(e){ return d; } },
@@ -10,26 +12,26 @@ let favs = new Set(store.get('favs', []));
 
 // 篩選維度：key = 資料欄位
 const DIMS = [
+  {key:'web',      label:'教案網頁'},
   {key:'category', label:'類別'},
   {key:'audience', label:'對象'},
   {key:'domains',  label:'訓練領域'},
   {key:'formats',  label:'形式'},
   {key:'themes',   label:'主題'},
   {key:'year',     label:'年份'},
-  {key:'source',   label:'來源'},
 ];
 const vals = (r, k) => { const v = r[k]; return Array.isArray(v) ? v : (v ? [v] : []); };
 
 const state = {
   q: '', sort: store.get('sort', 'new'), view: store.get('view', 'cards'),
-  sel: Object.fromEntries(DIMS.map(d => [d.key, new Set()])), onlyFav: false, onlyLesson: store.get('onlyLesson', true),
+  sel: Object.fromEntries(DIMS.map(d => [d.key, new Set()])), onlyFav: false,
   shown: 60,
 };
 
 // ---------- 搜尋 ----------
 function terms(){ return state.q.trim().toLowerCase().split(/\s+/).filter(Boolean); }
 function hay(r){
-  return r._hay || (r._hay = [r.title, r.summary, (r.materials||[]).join(' '), r.keyword, r.text,
+  return r._hay || (r._hay = [r.title, r.summary, (r.materials||[]).join(' '), r.keyword, r.text, r.links.map(l => l.url).join(' '),
     ...DIMS.flatMap(d => vals(r, d.key))].join('\n').toLowerCase());
 }
 function score(r, ts){
@@ -41,7 +43,6 @@ function score(r, ts){
 function filtered(exceptDim){
   const ts = terms();
   return DATA.filter(r => {
-    if(state.onlyLesson && !r.lesson) return false;
     if(state.onlyFav && !favs.has(r.id)) return false;
     for(const d of DIMS){
       if(d.key === exceptDim) continue;
@@ -58,10 +59,8 @@ function renderFacets(){
   const box = $('#facets'); box.innerHTML = '';
   const top = document.createElement('div'); top.className = 'facet';
   top.innerHTML = `<h3>顯示範圍</h3>
-    <label class="opt"><input type="checkbox" id="onlyLesson" ${state.onlyLesson?'checked':''}> 只看教案／活動素材 <span class="n">${DATA.filter(r=>r.lesson).length}</span></label>
     <label class="opt"><input type="checkbox" id="onlyFav" ${state.onlyFav?'checked':''}> 只看我的收藏 <span class="n">${favs.size}</span></label>`;
   box.appendChild(top);
-  top.querySelector('#onlyLesson').onchange = e => { state.onlyLesson = e.target.checked; store.set('onlyLesson', state.onlyLesson); update(); };
   top.querySelector('#onlyFav').onchange = e => { state.onlyFav = e.target.checked; update(); };
 
   for(const d of DIMS){
@@ -114,8 +113,13 @@ function sorted(list){
   const dir = state.sort === 'old' ? 1 : -1;
   return list.slice().sort((a,b) => dir * (a.date||'').localeCompare(b.date||''));
 }
+// 沒有圖（或載入失敗）時，用類別配色＋標題做封面，不留空白
+const COVER = {'教案/活動設計':'c1','網頁工具/生成器':'c2','紙本學習單/教材':'c3','影片/律動示範':'c4','衛教/知識文章':'c5','實務指南/工具包':'c6','課程講座/活動公告':'c7'};
+function coverHTML(r){
+  return `<div class="thumb cover ${COVER[r.category]||'c0'}"><span>${esc(r.title)}</span><small>${esc(r.category||'')}</small></div>`;
+}
 function thumbHTML(r){
-  return r.img ? `<div class="thumb" style="background-image:url('${esc(r.img)}')" data-img></div>` : `<div class="thumb">📄</div>`;
+  return r.img ? `<div class="thumb" style="background-image:url('${esc(r.img)}')" data-img="${r._i}"></div>` : coverHTML(r);
 }
 function tagsHTML(r, max){
   const t = [...vals(r,'domains'), ...vals(r,'audience')].slice(0, max);
@@ -128,8 +132,8 @@ function renderResults(){
   const box = $('#results'); const slice = list.slice(0, state.shown);
   if(!list.length){ box.innerHTML = '<div class="empty">沒有符合的教案，試著減少篩選條件或換個關鍵字。</div>'; $('#more').innerHTML=''; return; }
   if(state.view === 'table'){
-    box.innerHTML = `<table class="list"><thead><tr><th>日期</th><th>標題</th><th>類別</th><th>對象／領域</th><th></th></tr></thead><tbody>${
-      slice.map(r => `<tr data-i="${r._i}"><td class="d">${esc(r.date)}</td><td>${hl(r.title)}</td><td>${esc(r.category||'')}</td><td>${tagsHTML(r, 5)}</td><td><button class="star ${favs.has(r.id)?'on':''}" data-fav="${esc(r.id)}" title="收藏">${favs.has(r.id)?'★':'☆'}</button></td></tr>`).join('')
+    box.innerHTML = `<table class="list"><thead><tr><th>日期</th><th>標題</th><th>類別</th><th>對象／領域</th><th>網頁</th><th></th></tr></thead><tbody>${
+      slice.map(r => `<tr data-i="${r._i}"><td class="d">${esc(r.date)}</td><td>${hl(r.title)}</td><td>${esc(r.category||'')}</td><td>${tagsHTML(r, 5)}</td><td>${r.links.length ? `<a class="golink" href="${esc(r.links[0].url)}" target="_blank" rel="noopener" data-out>開啟 ↗</a>` : ''}</td><td><button class="star ${favs.has(r.id)?'on':''}" data-fav="${esc(r.id)}" title="收藏">${favs.has(r.id)?'★':'☆'}</button></td></tr>`).join('')
     }</tbody></table>`;
   } else {
     box.innerHTML = `<div class="grid">${slice.map(r => `
@@ -139,13 +143,14 @@ function renderResults(){
           <div class="ctitle">${hl(r.title)}</div>
           <div class="csum">${hl(r.summary || r.text.slice(0, 120))}</div>
           <div class="meta">${r.category?`<span class="tag cat">${esc(r.category)}</span>`:''}${tagsHTML(r, 3)}</div>
+          ${r.links.length ? `<a class="btn openweb" href="${esc(r.links[0].url)}" target="_blank" rel="noopener" data-out>開啟教案網頁 ↗</a>` : `<span class="noweb">尚未對應到網頁，可看臉書原文</span>`}
           <div class="meta"><span>${esc(r.date)}</span>${r.keyword?`<span>留言「${esc(r.keyword)}」</span>`:''}<button class="star ${favs.has(r.id)?'on':''}" data-fav="${esc(r.id)}" title="收藏">${favs.has(r.id)?'★':'☆'}</button></div>
         </div>
       </div>`).join('')}</div>`;
-    // 臉書圖片網址會過期：載入失敗就換成圖示
+    // 圖片載入失敗就換成文字封面
     box.querySelectorAll('[data-img]').forEach(el => {
       const url = el.style.backgroundImage.slice(5, -2); const im = new Image();
-      im.onerror = () => { el.style.backgroundImage = ''; el.textContent = '📄'; }; im.src = url;
+      im.onerror = () => { el.outerHTML = coverHTML(DATA[+el.dataset.img]); }; im.src = url;
     });
   }
   const m = $('#more'); m.innerHTML = '';
@@ -159,11 +164,13 @@ function renderResults(){
 function update(){ renderFacets(); renderChips(); renderResults(); }
 
 // ---------- 詳細頁 ----------
+const src = r => (r.links.length ? `【教案網頁】${r.links[0].url}\n` : '') + `【原教案】${r.title}\n${r.text}`;
 const PROMPTS = [
-  ['改編成其他對象', r => `以下是我過去設計的教案。請幫我改編成適合「（填入對象，例如：輕度失智長輩／國小低年級）」的版本，保留核心訓練目標，列出：活動目標、所需教具、帶領步驟（含時間）、難度調整方式、注意事項。\n\n【原教案】${r.title}\n${r.text}`],
-  ['整理成教案格式', r => `請把以下臉書貼文整理成正式教案格式：活動名稱、適用對象、訓練目標（職能治療觀點）、教具清單、活動流程（暖身／主活動／結束分享，含時間）、分級調整、成效觀察指標。\n\n${r.text}`],
-  ['延伸成系列課程', r => `請以以下教案為核心，延伸設計 4 週的系列課程，每週一個主題、逐週提高難度，並附每週教具與帶領重點。\n\n${r.text}`],
-  ['做成互動簡報', r => `請根據以下教案，設計一份給長者團體使用的互動簡報大綱（約 15 頁），包含開場提問、示範、互動遊戲頁、回顧與分享。\n\n${r.text}`],
+  ['依網頁做延伸版', r => `以下是我做過的互動教案網頁與介紹貼文。請先打開網頁了解玩法，再幫我設計一個延伸版本（換主題或提高難度），說明要改哪些內容、新增哪些關卡，並直接產出可用的單一 HTML 檔。\n\n${src(r)}`],
+  ['改編成其他對象', r => `以下是我過去設計的教案。請幫我改編成適合「（填入對象，例如：輕度失智長輩／國小低年級）」的版本，保留核心訓練目標，列出：活動目標、所需教具、帶領步驟（含時間）、難度調整方式、注意事項。\n\n${src(r)}`],
+  ['整理成教案格式', r => `請把以下臉書貼文整理成正式教案格式：活動名稱、適用對象、訓練目標（職能治療觀點）、教具清單、活動流程（暖身／主活動／結束分享，含時間）、分級調整、成效觀察指標。\n\n${src(r)}`],
+  ['延伸成系列課程', r => `請以以下教案為核心，延伸設計 4 週的系列課程，每週一個主題、逐週提高難度，並附每週教具與帶領重點。\n\n${src(r)}`],
+  ['做成互動簡報', r => `請根據以下教案，設計一份給長者團體使用的互動簡報大綱（約 15 頁），包含開場提問、示範、互動遊戲頁、回顧與分享。\n\n${src(r)}`],
 ];
 function openDetail(r){
   const dl = (label, arr) => arr && arr.length ? `<dt>${label}</dt><dd>${arr.map(x => `<span class="tag">${esc(x)}</span>`).join('')}</dd>` : '';
@@ -173,6 +180,7 @@ function openDetail(r){
       <button class="x" data-close aria-label="關閉">×</button></div>
     <div class="dbody">
       ${r.summary ? `<p>${esc(r.summary)}</p>` : ''}
+      ${r.links.length ? `<p class="weburl">${r.links.map((l,i) => `<a href="${esc(l.url)}" target="_blank" rel="noopener">${i ? '其他版本：' : ''}${esc(host(l.url))}</a>`).join('')}</p>` : '<p class="noweb">這篇還沒對應到教案網頁（可能是留言索取或外部連結），可開臉書原文查看。</p>'}
       <dl class="kv">
         <dt>日期</dt><dd>${esc(r.date || '未知')}・${esc(r.source)}${r.reposts ? `（另於 ${r.reposts.map(esc).join('、')} 重發）` : ''}</dd>
         ${r.category ? `<dt>類別</dt><dd><span class="tag cat">${esc(r.category)}</span></dd>` : ''}
@@ -180,7 +188,9 @@ function openDetail(r){
         ${r.keyword ? `<dt>留言關鍵字</dt><dd>「${esc(r.keyword)}」</dd>` : ''}
       </dl>
       <div class="actions">
-        ${r.href ? `<a class="btn" href="${esc(r.href)}" target="_blank" rel="noopener">開啟臉書原文</a>` : ''}
+        ${r.links.length ? `<a class="btn" href="${esc(r.links[0].url)}" target="_blank" rel="noopener">開啟教案網頁 ↗</a>` : ''}
+        ${r.href ? `<a class="btn ${r.links.length ? 'ghost' : ''}" href="${esc(r.href)}" target="_blank" rel="noopener">臉書原文</a>` : ''}
+        ${r.links.length ? `<button class="btn ghost" data-copy="url">複製網頁連結</button>` : ''}
         <button class="btn ghost" data-copy="text">複製全文</button>
       </div>
       <div class="prompts"><span class="inline">複製給 Claude：</span>${PROMPTS.map((p,i) => `<button class="chip" data-prompt="${i}">${p[0]}</button>`).join('')}</div>
@@ -190,7 +200,8 @@ function openDetail(r){
     </div>`;
   const dlg = $('#detail');
   dlg.querySelector('[data-close]').onclick = () => dlg.close();
-  dlg.querySelector('[data-copy]').onclick = () => copy(r.text, '已複製全文');
+  dlg.querySelector('[data-copy="text"]').onclick = () => copy(r.text, '已複製全文');
+  const cu = dlg.querySelector('[data-copy="url"]'); if(cu) cu.onclick = () => copy(r.links[0].url, '已複製網頁連結');
   dlg.querySelectorAll('[data-prompt]').forEach(b => b.onclick = () => copy(PROMPTS[+b.dataset.prompt][1](r), '已複製提示詞，貼到 Claude 即可'));
   if(!dlg.open) dlg.showModal();
   dlg.scrollTop = 0;
@@ -209,6 +220,7 @@ document.addEventListener('click', e => {
   if(f){ e.stopPropagation(); const id = f.dataset.fav; favs.has(id) ? favs.delete(id) : favs.add(id); store.set('favs', [...favs]);
     document.querySelectorAll(`[data-fav="${CSS.escape(id)}"]`).forEach(x => { x.classList.toggle('on', favs.has(id)); x.textContent = favs.has(id) ? '★' : '☆'; });
     if(state.onlyFav) update(); else renderFacets(); return; }
+  if(e.target.closest('[data-out]')) return;
   const c = e.target.closest('[data-i]');
   if(c && !e.target.closest('dialog')) openDetail(DATA[+c.dataset.i]);
 });
@@ -227,9 +239,9 @@ document.querySelectorAll('.seg button').forEach(b => {
 $('#toggleFacets').onclick = () => $('#facets').classList.toggle('open');
 $('#export').onclick = () => {
   const list = sorted(filtered());
-  const cols = ['date','title','category','audience','domains','formats','themes','materials','keyword','summary','href','text'];
+  const cols = ['date','title','weburl','category','audience','domains','formats','themes','materials','keyword','summary','href','text'];
   const cell = v => '"' + String(Array.isArray(v) ? v.join('、') : (v ?? '')).replace(/"/g, '""') + '"';
-  const csv = '﻿' + cols.join(',') + '\n' + list.map(r => cols.map(c => cell(r[c])).join(',')).join('\n');
+  const csv = '﻿' + cols.join(',') + '\n' + list.map(r => cols.map(c => cell(c === 'weburl' ? r.links.map(l => l.url) : r[c])).join(',')).join('\n');
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], {type:'text/csv'}));
   a.download = `教案知識庫_${list.length}筆.csv`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 };
