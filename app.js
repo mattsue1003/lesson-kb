@@ -36,6 +36,20 @@ const state = {
   shown: 60,
 };
 
+// ---------- 網址狀態 ----------
+function readHash(){
+  const h = new URLSearchParams(location.hash.slice(1));
+  state.q = h.get('q') || '';
+  for(const d of DIMS){ state.sel[d.key] = new Set((h.get(d.key) || '').split('|').filter(Boolean)); }
+}
+function writeHash(){
+  const h = new URLSearchParams();
+  if(state.q.trim()) h.set('q', state.q.trim());
+  for(const d of DIMS) if(state.sel[d.key].size) h.set(d.key, [...state.sel[d.key]].join('|'));
+  const str = h.toString();
+  if(str !== location.hash.slice(1)) history.replaceState(null, '', str ? '#' + str : location.pathname + location.search);
+}
+
 // ---------- 搜尋 ----------
 function terms(){ return state.q.trim().toLowerCase().split(/\s+/).filter(Boolean); }
 function hay(r){
@@ -155,7 +169,7 @@ function renderResults(){
           <div class="ctitle">${hl(r.title)}</div>
           <div class="csum">${hl(r.summary || r.text.slice(0, 120))}</div>
           <div class="meta">${r.category?`<span class="tag cat">${esc(r.category)}</span>`:''}${tagsHTML(r, 3)}</div>
-          ${r.links.length ? `<a class="btn openweb" href="${esc(r.links[0].url)}" target="_blank" rel="noopener" data-out>開啟教案網頁 ↗</a>` : `<span class="noweb">尚未對應到網頁，可看臉書原文</span>`}
+          ${r.links.length ? `<a class="btn openweb" href="${esc(r.links[0].url)}" target="_blank" rel="noopener" data-out>開啟教案網頁 ↗</a>` : `<span class="noweb">${r.href ? '尚未對應到網頁，點卡片可看臉書原文' : '尚未對應到網頁'}</span>`}
           <div class="meta"><span>${esc(r.date)}</span>${r.keyword?`<span>留言「${esc(r.keyword)}」</span>`:''}<button class="star ${favs.has(r.id)?'on':''}" data-fav="${esc(r.id)}" title="收藏">${favs.has(r.id)?'★':'☆'}</button></div>
         </div>
       </div>`).join('')}</div>`;
@@ -170,10 +184,16 @@ function renderResults(){
     const b = document.createElement('button'); b.className = 'btn ghost';
     b.textContent = `再顯示 ${Math.min(60, list.length - state.shown)} 筆（共 ${list.length}）`;
     b.onclick = () => { state.shown += 60; renderResults(); }; m.appendChild(b);
+    moreObs.observe(b);
   }
 }
 
-function update(){ renderFacets(); renderChips(); renderResults(); renderBar(); }
+const moreObs = 'IntersectionObserver' in window ? new IntersectionObserver(es => es.forEach(e => {
+  if(e.isIntersecting){ moreObs.unobserve(e.target); e.target.click(); } }), {rootMargin: '400px'}) : {observe(){}, unobserve(){}};
+function update(){ renderFacets(); renderChips(); renderResults(); renderBar(); writeHash();
+  const n = DIMS.reduce((a, d) => a + state.sel[d.key].size, 0) + (state.onlyFav ? 1 : 0) + (state.onlyPick ? 1 : 0);
+  $('#toggleFacets').textContent = n ? `篩選（${n}）` : '篩選';
+}
 
 // ---------- 多選工具列 ----------
 const one = (r, n) => `【教案 ${n}】${r.title}\n` + (r.links.length ? `網頁：${r.links.map(l => l.url).join('\n　　　')}\n` : '') +
@@ -192,7 +212,7 @@ function renderBar(){
   const vis = sorted(filtered()); const notIn = vis.filter(r => !isPicked(r.id)).length;
   if(!picks.length){
     bar.className = 'pickbar mini';
-    bar.innerHTML = `<span class="ptip">勾選卡片左上角的方框可以多選，再一起複製給 Claude</span>${vis.length && vis.length <= 60 ? `<button class="btn ghost" data-pa="all">全選目前 ${vis.length} 筆</button>` : ''}`;
+    bar.innerHTML = `<span class="ptip">勾選卡片左上角的方框可以多選，再一起複製給 Claude</span>${vis.length && vis.length <= 200 ? `<button class="btn ghost" data-pa="all">全選目前 ${vis.length} 筆</button>` : ''}`;
     return;
   }
   bar.className = 'pickbar';
@@ -200,7 +220,7 @@ function renderBar(){
     <span class="pgroup"><span class="plabel">複製給 Claude：</span>${MULTI.map((m,i) => `<button class="chip" data-pm="${i}">${m[0]}</button>`).join('')}</span>
     <span class="pgroup">
       <button class="btn ghost" data-pa="content">複製內容</button>
-      <button class="btn ghost" data-pa="urls">複製網頁連結</button>
+      <button class="btn" data-pa="share">連結／QR code</button>
       <button class="btn ghost" data-pa="list">${state.onlyPick ? '顯示全部' : '只看已選'}</button>
       ${notIn && vis.length <= 200 ? `<button class="btn ghost" data-pa="all">加選目前 ${notIn} 筆</button>` : ''}
       <button class="btn ghost" data-pa="clear">清除</button>
@@ -219,8 +239,7 @@ document.addEventListener('click', e => {
   const a = e.target.closest('[data-pa]'); if(!a) return;
   const act = a.dataset.pa, l = picked();
   if(act === 'content') copy(many(l), `已複製 ${l.length} 篇內容`);
-  if(act === 'urls'){ const u = l.filter(r => r.links.length).map(r => `${r.title}\n${r.links[0].url}`);
-    u.length ? copy(u.join('\n\n'), `已複製 ${u.length} 個網頁連結` + (u.length < l.length ? `（${l.length - u.length} 篇沒有網頁）` : '')) : toast('選取的教案都沒有網頁'); }
+  if(act === 'share') openShare();
   if(act === 'list'){ state.onlyPick = !state.onlyPick; state.shown = 60; update(); }
   if(act === 'all'){ sorted(filtered()).forEach(r => togglePick(r.id, true)); update(); toast(`已選 ${picks.length} 篇`); }
   if(act === 'clear'){ picks = []; store.set('picks', picks); state.onlyPick = false; update(); }
@@ -235,15 +254,19 @@ const PROMPTS = [
   ['延伸成系列課程', r => `請以以下教案為核心，延伸設計 4 週的系列課程，每週一個主題、逐週提高難度，並附每週教具與帶領重點。\n\n${src(r)}`],
   ['做成互動簡報', r => `請根據以下教案，設計一份給長者團體使用的互動簡報大綱（約 15 頁），包含開場提問、示範、互動遊戲頁、回顧與分享。\n\n${src(r)}`],
 ];
-function openDetail(r){
+let navList = [];
+function openDetail(r, keepList){
+  if(!keepList) navList = sorted(filtered());
+  const pos = navList.indexOf(r);
   const dl = (label, arr) => arr && arr.length ? `<dt>${label}</dt><dd>${arr.map(x => `<span class="tag">${esc(x)}</span>`).join('')}</dd>` : '';
   $('#detailBody').innerHTML = `
     <div class="dhead"><h2>${esc(r.title)}</h2>
       <button class="star ${favs.has(r.id)?'on':''}" data-fav="${esc(r.id)}" title="收藏" style="font-size:22px">${favs.has(r.id)?'★':'☆'}</button>
+      ${pos >= 0 ? `<span class="dnav"><button class="x" data-nav="-1" ${pos ? '' : 'disabled'} title="上一篇（←）">‹</button><button class="x" data-nav="1" ${pos < navList.length - 1 ? '' : 'disabled'} title="下一篇（→）">›</button></span>` : ''}
       <button class="x" data-close aria-label="關閉">×</button></div>
     <div class="dbody">
       ${r.summary ? `<p>${esc(r.summary)}</p>` : ''}
-      ${r.links.length ? `<p class="weburl">${r.links.map((l,i) => `<a href="${esc(l.url)}" target="_blank" rel="noopener">${i ? '其他版本：' : ''}${esc(host(l.url))}</a>`).join('')}</p>` : '<p class="noweb">這篇還沒對應到教案網頁（可能是留言索取或外部連結），可開臉書原文查看。</p>'}
+      ${r.links.length ? `<p class="weburl">${r.links.map((l,i) => `<a href="${esc(l.url)}" target="_blank" rel="noopener">${i ? '其他版本：' : ''}${esc(host(l.url))}</a>`).join('')}</p>` : `<p class="noweb">這篇還沒對應到教案網頁（可能是留言索取或外部連結）${r.href ? '，可開臉書原文查看' : ''}。</p>`}
       <dl class="kv">
         <dt>日期</dt><dd>${esc(r.date || '未知')}・${esc(r.source)}${r.reposts ? `（另於 ${r.reposts.map(esc).join('、')} 重發）` : ''}</dd>
         ${r.category ? `<dt>類別</dt><dd><span class="tag cat">${esc(r.category)}</span></dd>` : ''}
@@ -264,11 +287,16 @@ function openDetail(r){
     </div>`;
   const dlg = $('#detail');
   dlg.querySelector('[data-close]').onclick = () => dlg.close();
+  dlg.querySelectorAll('[data-nav]').forEach(b => b.onclick = () => navDetail(+b.dataset.nav));
   dlg.querySelector('[data-copy="text"]').onclick = () => copy(r.text, '已複製全文');
   const cu = dlg.querySelector('[data-copy="url"]'); if(cu) cu.onclick = () => copy(r.links[0].url, '已複製網頁連結');
   dlg.querySelectorAll('[data-prompt]').forEach(b => b.onclick = () => copy(PROMPTS[+b.dataset.prompt][1](r), '已複製提示詞，貼到 Claude 即可'));
   if(!dlg.open) dlg.showModal();
   dlg.scrollTop = 0;
+}
+function navDetail(d){
+  const i = navList.indexOf(DATA.find(r => r.id === $('#detail [data-fav]')?.dataset.fav)) + d;
+  if(i >= 0 && i < navList.length) openDetail(navList[i], true);
 }
 function copy(t, msg){
   (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(() => toast(msg), () => {
@@ -293,11 +321,16 @@ document.addEventListener('click', e => {
   if(c && !e.target.closest('dialog')) openDetail(DATA[+c.dataset.i]);
 });
 document.addEventListener('keydown', e => {
-  if(e.key === 'Enter' && e.target.matches('.card')) openDetail(DATA[+e.target.dataset.i]);
+  if(!(e.target instanceof Element)) return;
+  if((e.key === 'Enter' || e.key === ' ') && e.target.matches('.card')){ e.preventDefault(); openDetail(DATA[+e.target.dataset.i]); }
+  if($('#detail').open && (e.key === 'ArrowLeft' || e.key === 'ArrowRight') && !e.target.matches('input,textarea')){ e.preventDefault(); navDetail(e.key === 'ArrowLeft' ? -1 : 1); }
+  if(e.key === 'Escape' && e.target === $('#q') && $('#q').value){ $('#q').value = ''; state.q = ''; update(); }
   if(e.key === '/' && document.activeElement !== $('#q') && !$('#detail').open){ e.preventDefault(); $('#q').focus(); }
 });
 $('#detail').addEventListener('click', e => { if(e.target === $('#detail')) $('#detail').close(); });
 let qt; $('#q').addEventListener('input', e => { clearTimeout(qt); qt = setTimeout(() => { state.q = e.target.value; state.shown = 60; update(); }, 150); });
+readHash(); $('#q').value = state.q;
+window.addEventListener('hashchange', () => { readHash(); $('#q').value = state.q; state.shown = 60; update(); });
 $('#sort').value = state.sort;
 $('#sort').onchange = e => { state.sort = e.target.value; store.set('sort', state.sort); renderResults(); };
 document.querySelectorAll('.seg button').forEach(b => {
@@ -313,6 +346,170 @@ $('#export').onclick = () => {
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], {type:'text/csv'}));
   a.download = `教案知識庫_${list.length}筆.csv`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 };
+
+// ---------- 連結與 QR code（嵌入網頁／簡報用） ----------
+const QR_SRC = 'https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js';
+let qrLib;
+function loadQR(){
+  return qrLib || (qrLib = new Promise((ok, no) => {
+    if(window.qrcode) return ok(window.qrcode);
+    const sc = document.createElement('script'); sc.src = QR_SRC;
+    sc.onload = () => window.qrcode ? ok(window.qrcode) : no(); sc.onerror = () => { qrLib = null; no(); };
+    document.head.appendChild(sc);
+  }));
+}
+const shareOpt = Object.assign({fb: true, cols: 3, url: true}, store.get('shareOpt', {}));
+// 每篇取一個連結：有網頁用網頁，否則（勾選時）用臉書原文；同一網址只留一次
+function shareItems(){
+  const seen = new Set(), out = [];
+  for(const r of picked()){
+    const url = r.links.length ? r.links[0].url : (shareOpt.fb ? r.href : '');
+    if(!url || seen.has(url)) continue; seen.add(url);
+    out.push({title: r.title, url, fb: !r.links.length});
+  }
+  return out;
+}
+function matrix(url){
+  const q = window.qrcode(0, 'M'); q.addData(url); q.make();
+  const n = q.getModuleCount(); return {n, dark: (r, c) => q.isDark(r, c)};
+}
+function qrSVG(url, px){
+  const m = matrix(url), pad = 2, size = m.n + pad * 2; let d = '';
+  for(let r = 0; r < m.n; r++) for(let c = 0; c < m.n; c++){ // 同列連續黑格合成一段，嵌入碼小很多
+    if(!m.dark(r, c)) continue; let k = c; while(k + 1 < m.n && m.dark(r, k + 1)) k++;
+    d += `M${c + pad} ${r + pad}h${k - c + 1}v1H${c + pad}z`; c = k; }
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}" width="${px}" height="${px}" shape-rendering="crispEdges" role="img" aria-label="QR code"><rect width="${size}" height="${size}" fill="#fff"/><path d="${d}" fill="#000"/></svg>`;
+}
+const FONT = '-apple-system,"PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif';
+function wrapLines(ctx, text, w, max){
+  const lines = []; let cur = '';
+  for(const ch of text){
+    if(ctx.measureText(cur + ch).width > w && cur){ lines.push(cur); cur = ch; if(lines.length === max) break; } else cur += ch;
+  }
+  if(lines.length < max && cur) lines.push(cur);
+  if(lines.length === max && lines.join('').length < [...text].length){ let l = lines[max - 1]; while(ctx.measureText(l + '…').width > w && l) l = l.slice(0, -1); lines[max - 1] = l + '…'; }
+  return lines;
+}
+// 畫一格：QR＋標題（＋網址）
+function drawCell(ctx, it, x, y, W){
+  const qs = W - 40, m = matrix(it.url), cell = qs / (m.n + 4);
+  ctx.fillStyle = '#fff'; ctx.fillRect(x + 20, y + 16, qs, qs); ctx.fillStyle = '#000';
+  for(let r = 0; r < m.n; r++) for(let c = 0; c < m.n; c++) if(m.dark(r, c))
+    ctx.fillRect(Math.floor(x + 20 + (c + 2) * cell), Math.floor(y + 16 + (r + 2) * cell), Math.ceil(cell), Math.ceil(cell));
+  ctx.fillStyle = '#2b2620'; ctx.textAlign = 'center'; ctx.font = `700 ${Math.round(W / 15)}px ${FONT}`;
+  let ty = y + 16 + qs + W / 11;
+  for(const l of wrapLines(ctx, it.title, W - 24, 2)){ ctx.fillText(l, x + W / 2, ty); ty += W / 12; }
+  if(shareOpt.url){ ctx.fillStyle = '#7a6f62'; ctx.font = `${Math.round(W / 26)}px ${FONT}`;
+    ctx.fillText(wrapLines(ctx, it.url.replace(/^https?:\/\//, ''), W - 24, 1)[0] || '', x + W / 2, ty + 2); }
+}
+function cellH(W){ return 16 + (W - 40) + W / 11 + W / 12 * 2 + (shareOpt.url ? W / 20 : 0) + 8; }
+function renderCanvas(items, cols){
+  const W = 400, H = cellH(W), rows = Math.ceil(items.length / cols), padTop = 0;
+  const cv = document.createElement('canvas'); cv.width = W * Math.min(cols, items.length); cv.height = H * rows + padTop;
+  const ctx = cv.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cv.width, cv.height);
+  items.forEach((it, i) => drawCell(ctx, it, (i % cols) * W, padTop + Math.floor(i / cols) * H, W));
+  return cv;
+}
+const toBlob = cv => new Promise(ok => cv.toBlob(ok, 'image/png'));
+function download(blob, name){
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1500);
+}
+async function copyImage(cv, msg){
+  try{
+    if(!window.ClipboardItem || !navigator.clipboard?.write) throw 0;
+    await navigator.clipboard.write([new ClipboardItem({'image/png': toBlob(cv)})]); toast(msg);
+  }catch(e){ toast('這個瀏覽器不能直接複製圖片，請改用「下載」'); }
+}
+// 複製「可點擊的超連結」：同時放 HTML 與純文字，貼到簡報／Word／Google 文件都會是超連結
+async function copyRich(html, text, msg){
+  try{
+    if(!window.ClipboardItem || !navigator.clipboard?.write) throw 0;
+    await navigator.clipboard.write([new ClipboardItem({'text/html': new Blob([html], {type: 'text/html'}), 'text/plain': new Blob([text], {type: 'text/plain'})})]);
+    toast(msg);
+  }catch(e){ copy(text, msg); }
+}
+const safeName = s => s.replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 40);
+function embedHTML(items){
+  return `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:16px;font-family:${FONT.replace(/"/g, "'")};">\n` +
+    items.map(it => `  <a href="${esc(it.url)}" target="_blank" rel="noopener" style="display:block;text-align:center;text-decoration:none;color:#2b2620;background:#fff;border:1px solid #e4dccd;border-radius:12px;padding:12px;">\n    ${qrSVG(it.url, 140).replace('<svg ', '<svg style="display:block;margin:0 auto 6px;width:140px;height:140px" ')}\n    <span style="font-weight:700;font-size:15px;line-height:1.4">${esc(it.title)}</span>\n  </a>`).join('\n') + '\n</div>';
+}
+function sheetHTML(items){
+  return `<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><title>教案資源 QR code</title>
+<style>body{margin:24px;font-family:${FONT};color:#2b2620}h1{font-size:20px;margin:0 0 16px}
+.g{display:grid;grid-template-columns:repeat(${shareOpt.cols},1fr);gap:18px}
+.c{border:1px solid #ccc;border-radius:10px;padding:12px;text-align:center;break-inside:avoid}
+.c svg{width:100%;height:auto;max-width:220px}.t{font-weight:700;font-size:15px;margin-top:4px}.u{font-size:10.5px;color:#777;word-break:break-all}
+@page{margin:12mm}</style></head><body><h1>教案資源（${items.length} 項）・手機掃描 QR code 開啟</h1><div class="g">` +
+    items.map(it => `<div class="c">${qrSVG(it.url, 220)}<div class="t">${esc(it.title)}</div>${shareOpt.url ? `<div class="u">${esc(it.url)}</div>` : ''}</div>`).join('') +
+    `</div></body></html>`;
+}
+function printSheet(items){
+  const f = document.createElement('iframe'); f.style.cssText = 'position:fixed;width:0;height:0;border:0;right:0;bottom:0';
+  document.body.appendChild(f); f.srcdoc = sheetHTML(items);
+  f.onload = () => { f.contentWindow.focus(); f.contentWindow.print(); setTimeout(() => f.remove(), 60000); };
+}
+async function openShare(){
+  let dlg = $('#share');
+  if(!dlg){ dlg = document.createElement('dialog'); dlg.id = 'share'; document.body.appendChild(dlg);
+    dlg.addEventListener('click', e => { if(e.target === dlg) dlg.close(); }); }
+  dlg.innerHTML = '<div class="dbody">產生 QR code 中…</div>'; if(!dlg.open) dlg.showModal();
+  try{ await loadQR(); }catch(e){ dlg.innerHTML = '<div class="dbody">QR code 元件載入失敗，請確認網路後再試一次。<p><button class="btn" data-close>關閉</button></p></div>'; dlg.querySelector('[data-close]').onclick = () => dlg.close(); return; }
+  drawShare(dlg);
+}
+function drawShare(dlg){
+  const all = picked(), items = shareItems();
+  const noWeb = all.filter(r => !r.links.length).length, dup = all.filter(r => r.links.length || (shareOpt.fb && r.href)).length - items.length;
+  dlg.innerHTML = `
+    <div class="dhead"><h2>連結與 QR code（${items.length} 項）</h2><button class="x" data-close aria-label="關閉">×</button></div>
+    <div class="dbody">
+      <p class="shnote">已選 ${all.length} 篇。${noWeb ? `其中 ${noWeb} 篇沒有教案網頁，` + (shareOpt.fb ? '改用臉書原文連結。' : '已略過。') : ''}${dup > 0 ? `有 ${dup} 篇是同一個網頁（例如更新公告），只放一次。` : ''}</p>
+      <div class="shopts">
+        ${noWeb ? `<label class="inline"><input type="checkbox" data-o="fb" ${shareOpt.fb ? 'checked' : ''}> 沒網頁的用臉書原文</label>` : ''}
+        <label class="inline"><input type="checkbox" data-o="url" ${shareOpt.url ? 'checked' : ''}> 圖上顯示網址</label>
+        <label class="inline">總覽圖每列 <select data-o="cols">${[2,3,4,5].map(n => `<option ${n === shareOpt.cols ? 'selected' : ''}>${n}</option>`).join('')}</select> 個</label>
+      </div>
+      ${items.length ? `
+      <div class="shgroup"><b>放進簡報</b>
+        <button class="btn" data-s="img-copy">複製 QR 總覽圖</button>
+        <button class="btn ghost" data-s="img-dl">下載總覽圖 PNG</button>
+        <button class="btn ghost" data-s="rich">複製超連結清單</button>
+      </div>
+      <div class="shgroup"><b>放進網頁</b>
+        <button class="btn ghost" data-s="embed">複製 HTML 嵌入碼（含 QR）</button>
+        <button class="btn ghost" data-s="md">複製 Markdown</button>
+      </div>
+      <div class="shgroup"><b>其他</b>
+        <button class="btn ghost" data-s="print">列印／存成 PDF</button>
+        <button class="btn ghost" data-s="text">複製純文字清單</button>
+      </div>
+      <p class="shtip">「複製超連結清單」貼到 PowerPoint、Keynote、Google 簡報或 Word，標題就是可以點的連結。單張 QR code 可以在下面各自複製或下載。</p>
+      <div class="shgrid">${items.map((it, i) => `
+        <div class="shitem">${qrSVG(it.url, 120)}
+          <a href="${esc(it.url)}" target="_blank" rel="noopener">${esc(it.title)}</a>${it.fb ? '<small>臉書原文</small>' : ''}
+          <span><button class="chip" data-one="copy" data-k="${i}">複製圖</button><button class="chip" data-one="dl" data-k="${i}">下載</button></span>
+        </div>`).join('')}</div>` : '<p class="noweb">選取的教案都沒有可用的連結。</p>'}
+    </div>`;
+  dlg.querySelector('[data-close]').onclick = () => dlg.close();
+  dlg.querySelectorAll('[data-o]').forEach(el => el.onchange = () => {
+    const k = el.dataset.o; shareOpt[k] = k === 'cols' ? +el.value : el.checked; store.set('shareOpt', shareOpt); drawShare(dlg);
+  });
+  const text = () => items.map(it => `${it.title}\n${it.url}`).join('\n\n');
+  const act = {
+    'img-copy': () => copyImage(renderCanvas(items, shareOpt.cols), `已複製 ${items.length} 個 QR code 的總覽圖，貼到簡報即可`),
+    'img-dl': async () => download(await toBlob(renderCanvas(items, shareOpt.cols)), `教案QR總覽_${items.length}項.png`),
+    'rich': () => copyRich(`<ul>${items.map(it => `<li><a href="${esc(it.url)}">${esc(it.title)}</a></li>`).join('')}</ul>`, text(), `已複製 ${items.length} 個超連結`),
+    'embed': () => copy(embedHTML(items), '已複製 HTML 嵌入碼，貼到網頁原始碼即可'),
+    'md': () => copy(items.map(it => `- [${it.title}](${it.url})`).join('\n'), '已複製 Markdown 連結清單'),
+    'text': () => copy(text(), `已複製 ${items.length} 個連結`),
+    'print': () => printSheet(items),
+  };
+  dlg.querySelectorAll('[data-s]').forEach(b => b.onclick = () => act[b.dataset.s]());
+  dlg.querySelectorAll('[data-one]').forEach(b => b.onclick = async () => {
+    const it = items[+b.dataset.k], cv = renderCanvas([it], 1);
+    if(b.dataset.one === 'copy') copyImage(cv, '已複製這個 QR code'); else download(await toBlob(cv), `QR_${safeName(it.title)}.png`);
+  });
+}
 
 update();
 })();
