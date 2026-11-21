@@ -9,6 +9,14 @@ const store = {
   set(k, v){ try{ localStorage.setItem('lessonkb.' + k, JSON.stringify(v)); }catch(e){} }
 };
 let favs = new Set(store.get('favs', []));
+let picks = store.get('picks', []).filter(id => DATA.some(r => r.id === id)); // 多選（保留勾選順序）
+const BYID = new Map(DATA.map(r => [r.id, r]));
+const isPicked = id => picks.includes(id);
+function togglePick(id, on){
+  const has = isPicked(id); if(on === undefined) on = !has;
+  if(on && !has) picks.push(id); if(!on && has) picks = picks.filter(x => x !== id);
+  store.set('picks', picks);
+}
 
 // 篩選維度：key = 資料欄位
 const DIMS = [
@@ -24,7 +32,7 @@ const vals = (r, k) => { const v = r[k]; return Array.isArray(v) ? v : (v ? [v] 
 
 const state = {
   q: '', sort: store.get('sort', 'new'), view: store.get('view', 'cards'),
-  sel: Object.fromEntries(DIMS.map(d => [d.key, new Set()])), onlyFav: false,
+  sel: Object.fromEntries(DIMS.map(d => [d.key, new Set()])), onlyFav: false, onlyPick: false,
   shown: 60,
 };
 
@@ -44,6 +52,7 @@ function filtered(exceptDim){
   const ts = terms();
   return DATA.filter(r => {
     if(state.onlyFav && !favs.has(r.id)) return false;
+    if(state.onlyPick && !isPicked(r.id)) return false;
     for(const d of DIMS){
       if(d.key === exceptDim) continue;
       const s = state.sel[d.key]; if(!s.size) continue;
@@ -59,9 +68,11 @@ function renderFacets(){
   const box = $('#facets'); box.innerHTML = '';
   const top = document.createElement('div'); top.className = 'facet';
   top.innerHTML = `<h3>顯示範圍</h3>
-    <label class="opt"><input type="checkbox" id="onlyFav" ${state.onlyFav?'checked':''}> 只看我的收藏 <span class="n">${favs.size}</span></label>`;
+    <label class="opt"><input type="checkbox" id="onlyFav" ${state.onlyFav?'checked':''}> 只看我的收藏 <span class="n">${favs.size}</span></label>
+    <label class="opt"><input type="checkbox" id="onlyPick" ${state.onlyPick?'checked':''}> 只看已勾選 <span class="n">${picks.length}</span></label>`;
   box.appendChild(top);
   top.querySelector('#onlyFav').onchange = e => { state.onlyFav = e.target.checked; update(); };
+  top.querySelector('#onlyPick').onchange = e => { state.onlyPick = e.target.checked; update(); };
 
   for(const d of DIMS){
     const base = filtered(d.key);
@@ -133,11 +144,12 @@ function renderResults(){
   if(!list.length){ box.innerHTML = '<div class="empty">沒有符合的教案，試著減少篩選條件或換個關鍵字。</div>'; $('#more').innerHTML=''; return; }
   if(state.view === 'table'){
     box.innerHTML = `<table class="list"><thead><tr><th>日期</th><th>標題</th><th>類別</th><th>對象／領域</th><th>網頁</th><th></th></tr></thead><tbody>${
-      slice.map(r => `<tr data-i="${r._i}"><td class="d">${esc(r.date)}</td><td>${hl(r.title)}</td><td>${esc(r.category||'')}</td><td>${tagsHTML(r, 5)}</td><td>${r.links.length ? `<a class="golink" href="${esc(r.links[0].url)}" target="_blank" rel="noopener" data-out>開啟 ↗</a>` : ''}</td><td><button class="star ${favs.has(r.id)?'on':''}" data-fav="${esc(r.id)}" title="收藏">${favs.has(r.id)?'★':'☆'}</button></td></tr>`).join('')
+      slice.map(r => `<tr data-i="${r._i}" class="${isPicked(r.id)?'picked':''}"><td class="d">${esc(r.date)}</td><td>${hl(r.title)}</td><td>${esc(r.category||'')}</td><td>${tagsHTML(r, 5)}</td><td>${r.links.length ? `<a class="golink" href="${esc(r.links[0].url)}" target="_blank" rel="noopener" data-out>開啟 ↗</a>` : ''}</td><td class="acts"><label class="pick" data-pick="${esc(r.id)}" title="勾選，之後一起複製"><input type="checkbox" ${isPicked(r.id)?'checked':''}></label><button class="star ${favs.has(r.id)?'on':''}" data-fav="${esc(r.id)}" title="收藏">${favs.has(r.id)?'★':'☆'}</button></td></tr>`).join('')
     }</tbody></table>`;
   } else {
     box.innerHTML = `<div class="grid">${slice.map(r => `
-      <div class="card" role="button" tabindex="0" data-i="${r._i}">
+      <div class="card ${isPicked(r.id)?'picked':''}" role="button" tabindex="0" data-i="${r._i}">
+        <label class="pick" data-pick="${esc(r.id)}" title="勾選，之後一起複製"><input type="checkbox" ${isPicked(r.id)?'checked':''}></label>
         ${thumbHTML(r)}
         <div class="cbody">
           <div class="ctitle">${hl(r.title)}</div>
@@ -161,7 +173,58 @@ function renderResults(){
   }
 }
 
-function update(){ renderFacets(); renderChips(); renderResults(); }
+function update(){ renderFacets(); renderChips(); renderResults(); renderBar(); }
+
+// ---------- 多選工具列 ----------
+const one = (r, n) => `【教案 ${n}】${r.title}\n` + (r.links.length ? `網頁：${r.links.map(l => l.url).join('\n　　　')}\n` : '') +
+  (r.summary ? `摘要：${r.summary}\n` : '') + `原文：\n${r.text}`;
+const many = list => list.map((r, i) => one(r, i + 1)).join('\n\n────────\n\n');
+const MULTI = [
+  ['做成簡報', l => `以下是我做過的 ${l.length} 份教案（有網頁的請先打開了解內容）。請參考這些教案，幫我做一份給長者團體使用的互動簡報（單一 HTML 檔，約 15–20 頁），整合各教案的活動與重點，包含開場提問、示範、互動遊戲頁、回顧與分享。\n\n${many(l)}`],
+  ['做成講義', l => `以下是我做過的 ${l.length} 份教案（有網頁的請先打開了解內容）。請參考這些教案，幫我整理成一份可列印的 A4 講義／學習單（字大、版面清楚），整合活動目標、步驟、練習題與居家延伸建議。\n\n${many(l)}`],
+  ['做成網頁', l => `以下是我做過的 ${l.length} 份互動教案網頁與介紹。請先打開各網頁了解玩法，再參考它們做一個新的互動教案網頁（單一 HTML 檔），融合這些教案的優點，並說明設計重點。\n\n${many(l)}`],
+  ['整合成系列課程', l => `以下是我做過的 ${l.length} 份教案。請把它們整合成一套系列課程，安排先後順序與難度遞進，列出每堂課的目標、教具、帶領流程與時間。\n\n${many(l)}`],
+];
+function picked(){ return picks.map(id => BYID.get(id)).filter(Boolean); }
+function renderBar(){
+  let bar = $('#pickbar');
+  if(!bar){ bar = document.createElement('div'); bar.id = 'pickbar'; bar.className = 'pickbar'; document.body.appendChild(bar); }
+  const vis = sorted(filtered()); const notIn = vis.filter(r => !isPicked(r.id)).length;
+  if(!picks.length){
+    bar.className = 'pickbar mini';
+    bar.innerHTML = `<span class="ptip">勾選卡片左上角的方框可以多選，再一起複製給 Claude</span>${vis.length && vis.length <= 60 ? `<button class="btn ghost" data-pa="all">全選目前 ${vis.length} 筆</button>` : ''}`;
+    return;
+  }
+  bar.className = 'pickbar';
+  bar.innerHTML = `<b>已選 ${picks.length} 篇</b>
+    <span class="pgroup"><span class="plabel">複製給 Claude：</span>${MULTI.map((m,i) => `<button class="chip" data-pm="${i}">${m[0]}</button>`).join('')}</span>
+    <span class="pgroup">
+      <button class="btn ghost" data-pa="content">複製內容</button>
+      <button class="btn ghost" data-pa="urls">複製網頁連結</button>
+      <button class="btn ghost" data-pa="list">${state.onlyPick ? '顯示全部' : '只看已選'}</button>
+      ${notIn && vis.length <= 200 ? `<button class="btn ghost" data-pa="all">加選目前 ${notIn} 筆</button>` : ''}
+      <button class="btn ghost" data-pa="clear">清除</button>
+    </span>`;
+}
+function syncPick(id){
+  document.querySelectorAll(`[data-pick="${CSS.escape(id)}"]`).forEach(l => {
+    const on = isPicked(id); const i = l.querySelector('input'); if(i) i.checked = on;
+    const host = l.closest('.card, tr'); if(host) host.classList.toggle('picked', on);
+    if(l.matches('button')) l.textContent = on ? '✓ 已加入多選' : '＋ 加入多選';
+  });
+}
+document.addEventListener('click', e => {
+  const m = e.target.closest('[data-pm]');
+  if(m){ const l = picked(); copy(MULTI[+m.dataset.pm][1](l), `已複製 ${l.length} 篇的提示詞，貼到 Claude 即可`); return; }
+  const a = e.target.closest('[data-pa]'); if(!a) return;
+  const act = a.dataset.pa, l = picked();
+  if(act === 'content') copy(many(l), `已複製 ${l.length} 篇內容`);
+  if(act === 'urls'){ const u = l.filter(r => r.links.length).map(r => `${r.title}\n${r.links[0].url}`);
+    u.length ? copy(u.join('\n\n'), `已複製 ${u.length} 個網頁連結` + (u.length < l.length ? `（${l.length - u.length} 篇沒有網頁）` : '')) : toast('選取的教案都沒有網頁'); }
+  if(act === 'list'){ state.onlyPick = !state.onlyPick; state.shown = 60; update(); }
+  if(act === 'all'){ sorted(filtered()).forEach(r => togglePick(r.id, true)); update(); toast(`已選 ${picks.length} 篇`); }
+  if(act === 'clear'){ picks = []; store.set('picks', picks); state.onlyPick = false; update(); }
+});
 
 // ---------- 詳細頁 ----------
 const src = r => (r.links.length ? `【教案網頁】${r.links[0].url}\n` : '') + `【原教案】${r.title}\n${r.text}`;
@@ -192,6 +255,7 @@ function openDetail(r){
         ${r.href ? `<a class="btn ${r.links.length ? 'ghost' : ''}" href="${esc(r.href)}" target="_blank" rel="noopener">臉書原文</a>` : ''}
         ${r.links.length ? `<button class="btn ghost" data-copy="url">複製網頁連結</button>` : ''}
         <button class="btn ghost" data-copy="text">複製全文</button>
+        <button class="btn ghost" data-pick="${esc(r.id)}">${isPicked(r.id) ? '✓ 已加入多選' : '＋ 加入多選'}</button>
       </div>
       <div class="prompts"><span class="inline">複製給 Claude：</span>${PROMPTS.map((p,i) => `<button class="chip" data-prompt="${i}">${p[0]}</button>`).join('')}</div>
       <h3 style="font-size:14px;color:var(--muted);margin:16px 0 6px">貼文全文</h3>
@@ -220,6 +284,10 @@ document.addEventListener('click', e => {
   if(f){ e.stopPropagation(); const id = f.dataset.fav; favs.has(id) ? favs.delete(id) : favs.add(id); store.set('favs', [...favs]);
     document.querySelectorAll(`[data-fav="${CSS.escape(id)}"]`).forEach(x => { x.classList.toggle('on', favs.has(id)); x.textContent = favs.has(id) ? '★' : '☆'; });
     if(state.onlyFav) update(); else renderFacets(); return; }
+  const pk = e.target.closest('[data-pick]');
+  if(pk){ e.stopPropagation(); if(pk.matches('label') && e.target.tagName !== 'INPUT') return; // label 會再觸發一次 input click
+    const id = pk.dataset.pick; togglePick(id); syncPick(id);
+    if(state.onlyPick) renderResults(); renderFacets(); renderBar(); return; }
   if(e.target.closest('[data-out]')) return;
   const c = e.target.closest('[data-i]');
   if(c && !e.target.closest('dialog')) openDetail(DATA[+c.dataset.i]);
