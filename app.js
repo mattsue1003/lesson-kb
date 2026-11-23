@@ -14,6 +14,9 @@ function repoOf(r){
     zip: `https://github.com/${OWNER}/${name}/archive/refs/heads/${info.b}.zip`,
     gh: `https://github.com/${OWNER}/${name}`} : null;
 }
+// 學生常用的三個 AI：一律並列，ChatGPT 與 Gemini 在前
+const AIS = [['ChatGPT', 'https://chatgpt.com/'], ['Gemini', 'https://gemini.google.com/app'], ['Claude', 'https://claude.ai/new']];
+const aiLinks = (cls = 'btn ghost') => AIS.map(([n, u]) => `<a class="${cls} ai" href="${u}" target="_blank" rel="noopener" data-out>開啟 ${n} ↗</a>`).join('');
 const kb = n => n < 1024 * 1024 ? Math.max(1, Math.round(n / 1024)) + ' KB' : (n / 1048576).toFixed(1) + ' MB';
 const host = u => { try{ const x = new URL(u); return x.host + x.pathname.replace(/\/$/, ''); }catch(e){ return u; } };
 const $ = s => document.querySelector(s);
@@ -227,12 +230,13 @@ function renderBar(){
   const vis = sorted(filtered()); const notIn = vis.filter(r => !isPicked(r.id)).length;
   if(!picks.length){
     bar.className = 'pickbar mini';
-    bar.innerHTML = `<span class="ptip">勾選卡片左上角的方框可以多選，再一起複製給 Claude</span>${vis.length && vis.length <= 200 ? `<button class="btn ghost" data-pa="all">全選目前 ${vis.length} 筆</button>` : ''}`;
+    bar.innerHTML = `<span class="ptip">勾選卡片左上角的方框可以多選，再一起複製給 AI（ChatGPT、Gemini、Claude 都可以）</span>${vis.length && vis.length <= 200 ? `<button class="btn ghost" data-pa="all">全選目前 ${vis.length} 筆</button>` : ''}`;
     return;
   }
   bar.className = 'pickbar';
   bar.innerHTML = `<b>已選 ${picks.length} 篇</b>
     <span class="pgroup"><span class="plabel">複製提示詞：</span>${MULTI.map((m,i) => `<button class="chip" data-pm="${i}">${m[0]}</button>`).join('')}</span>
+    <span class="pgroup aiopen"><span class="plabel">開啟：</span>${AIS.map(([n, u]) => `<a class="ailink" href="${u}" target="_blank" rel="noopener">${n}</a>`).join('')}</span>
     <span class="pgroup">
       <button class="btn ghost" data-pa="content">複製內容</button>
       <button class="btn" data-pa="share">連結／QR code</button>
@@ -250,7 +254,7 @@ function syncPick(id){
 }
 document.addEventListener('click', e => {
   const m = e.target.closest('[data-pm]');
-  if(m){ const l = picked(); copy(MULTI[+m.dataset.pm][1](l), `已複製 ${l.length} 篇的提示詞，貼到 Claude 即可`); return; }
+  if(m){ const l = picked(); copy(MULTI[+m.dataset.pm][1](l), `已複製 ${l.length} 篇的提示詞，貼到 ChatGPT、Gemini 或 Claude 即可`); return; }
   const a = e.target.closest('[data-pa]'); if(!a) return;
   const act = a.dataset.pa, l = picked();
   if(act === 'content') copy(many(l), `已複製 ${l.length} 篇內容`);
@@ -283,7 +287,7 @@ function remakeHTML(r){
           ${multi ? `<a class="btn ghost" href="${esc(g.zip)}" data-out>下載全部檔案 ZIP（${kb(g.ts)}）</a>` : ''}
           <a class="btn ghost" href="${esc(g.gh)}" target="_blank" rel="noopener" data-out>在 GitHub 看程式碼 ↗</a>
         </div>
-        ${multi ? `<p class="hint">這份教案有 ${g.n} 個檔案（含圖片、音檔或其他程式）。主程式通常就夠 AI 看懂玩法；要完整複製時再用 ZIP：ChatGPT 可以直接上傳 ZIP，Gemini 請先解壓縮再上傳裡面的檔案。</p>` : ''}
+        ${multi ? `<p class="hint">這份教案有 ${g.n} 個檔案（含圖片、音檔或其他程式）。主程式通常就夠 AI 看懂玩法；要完整複製時再用 ZIP：ChatGPT 可以直接上傳 ZIP；Gemini 和 Claude 請先解壓縮，再上傳裡面的主要檔案。</p>` : ''}
         ${g.ms > 300000 ? `<p class="hint">檔案比較大（${kb(g.ms)}），AI 可能讀不完；可以在提示詞裡請它「先說明這份程式的結構」再改。</p>` : ''}
       </li>
       <li><b>寫下你想改成什麼</b>
@@ -296,13 +300,12 @@ function remakeHTML(r){
       <li><b>複製提示詞，打開 AI，上傳剛剛下載的檔案再貼上</b>
         <div class="row">
           <button class="btn" data-rm="prompt">複製提示詞</button>
-          <a class="btn ghost" href="https://chatgpt.com/" target="_blank" rel="noopener" data-out>開啟 ChatGPT ↗</a>
-          <a class="btn ghost" href="https://gemini.google.com/app" target="_blank" rel="noopener" data-out>開啟 Gemini ↗</a>
+          ${aiLinks()}
         </div>
         ${g.ms <= 60000 ? `<p class="hint">不想上傳檔案？按 <button class="linkbtn" data-rm="withcode">複製提示詞＋程式碼</button>，直接貼到 AI 就好（這份程式碼 ${kb(g.ms)}，貼得下）。</p>` : ''}
       </li>
       <li><b>把 AI 給的 HTML 存成檔案，用瀏覽器打開試玩</b>
-        <p class="hint">ChatGPT 通常會給下載連結；Gemini 可按程式碼框右上角複製，貼到記事本存成「我的教案.html」。不滿意就直接跟 AI 說哪裡要改，例如「按鈕再大一點」「第 3 題換掉」。</p>
+        <p class="hint">ChatGPT 通常會給下載連結；Gemini 可按程式碼框右上角的複製鍵；Claude 會在右邊直接顯示做好的網頁，可按右上角下載或複製。複製的話，貼到記事本存成「我的教案.html」。不滿意就直接跟 AI 說哪裡要改，例如「按鈕再大一點」「第 3 題換掉」。</p>
       </li>
     </ol>
   </section>`;
@@ -333,12 +336,12 @@ function bindRemake(dlg, r){
   dlg.querySelectorAll('[data-f]').forEach(el => el.oninput = () => { draft[el.dataset.f] = el.value; store.set('remake', draft); });
   dlg.querySelectorAll('[data-rm]').forEach(b => b.onclick = async e => {
     e.stopPropagation(); const k = b.dataset.rm;
-    if(k === 'prompt') return copy(remakePrompt(r), '已複製提示詞：打開 ChatGPT 或 Gemini，先上傳檔案再貼上');
+    if(k === 'prompt') return copy(remakePrompt(r), '已複製提示詞：打開 ChatGPT、Gemini 或 Claude，先上傳檔案再貼上');
     const old = b.textContent; b.disabled = true; b.textContent = '下載中…';
     try{
       const code = await fetchCode(g);
       if(k === 'dl'){ download(new Blob([code], {type: 'text/html'}), `${g.name}.html`); toast('已下載，接著到第 2、3 步'); }
-      else copy(remakePrompt(r, code), '已複製提示詞＋程式碼，直接貼到 ChatGPT 或 Gemini');
+      else copy(remakePrompt(r, code), '已複製提示詞＋程式碼，直接貼到 ChatGPT、Gemini 或 Claude');
     }catch(err){ toast('下載失敗，請改按「在 GitHub 看程式碼」'); }
     b.disabled = false; b.textContent = old;
   });
@@ -350,16 +353,16 @@ function openGuide(){
   const nWeb = DATA.filter(r => repoOf(r)).length;
   d.innerHTML = `<div class="dhead"><h2>學生怎麼用這個教案庫</h2><button class="x" data-close aria-label="關閉">×</button></div>
   <div class="dbody guide">
-    <p>這裡收集了 ${DATA.length} 份職能治療教案，其中 ${nWeb} 份是互動網頁，而且<b>每一份的程式檔都可以下載</b>。你可以把它交給 ChatGPT 或 Gemini，換成自己的主題，做出一份類似的新教案。</p>
+    <p>這裡收集了 ${DATA.length} 份職能治療教案，其中 ${nWeb} 份是互動網頁，而且<b>每一份的程式檔都可以下載</b>。你可以把它交給 ChatGPT、Gemini 或 Claude（用你習慣的那一個就好），換成自己的主題，做出一份類似的新教案。</p>
     <ol class="steps">
       <li><b>找到喜歡的教案</b>：上方搜尋關鍵字（例如「猜歌」「手部」「記憶」），或用左邊的「訓練領域」「對象」篩選。</li>
       <li><b>點開那張卡片</b>，往下捲到「學生：照這份教案做一份自己的」。</li>
       <li><b>下載程式檔</b>，再填上想換的主題和對象。</li>
-      <li><b>按「複製提示詞」</b>，打開 ChatGPT 或 Gemini，先上傳剛剛的檔案，再貼上提示詞送出。</li>
+      <li><b>按「複製提示詞」</b>，打開 ChatGPT、Gemini 或 Claude，先上傳剛剛的檔案，再貼上提示詞送出。</li>
       <li><b>把 AI 給你的 HTML 存檔</b>，用瀏覽器打開試玩；哪裡不滿意就繼續跟 AI 說。</li>
     </ol>
     <p class="hint">小技巧：程式碼比較小的教案，可以按「複製提示詞＋程式碼」，不用上傳檔案，直接貼上就好。想參考好幾份教案，就勾選卡片左上角的方框，用下方工具列一起複製。</p>
-    <p><button class="btn" data-close>開始找教案</button></p>
+    <p class="row guiderow"><button class="btn" data-close>開始找教案</button>${aiLinks()}</p>
   </div>`;
   d.showModal();
 }
@@ -391,7 +394,8 @@ function openDetail(r, keepList){
         <button class="btn ghost" data-pick="${esc(r.id)}">${isPicked(r.id) ? '✓ 已加入多選' : '＋ 加入多選'}</button>
       </div>
       ${remakeHTML(r)}
-      <div class="prompts"><span class="inline">複製提示詞（老師備課用）：</span>${PROMPTS.map((p,i) => `<button class="chip" data-prompt="${i}">${p[0]}</button>`).join('')}</div>
+      <div class="prompts"><span class="inline">複製提示詞：</span>${PROMPTS.map((p,i) => `<button class="chip" data-prompt="${i}">${p[0]}</button>`).join('')}</div>
+      <div class="prompts aiopen"><span class="inline">再打開 AI 貼上：</span>${AIS.map(([n, u]) => `<a class="ailink" href="${u}" target="_blank" rel="noopener">${n} ↗</a>`).join('')}</div>
       <h3 style="font-size:14px;color:var(--muted);margin:16px 0 6px">貼文全文</h3>
       ${r.img ? `<img src="${esc(r.img)}" alt="" loading="lazy" onerror="this.remove()">` : ''}
       <div class="full">${hl(r.text)}</div>
@@ -404,7 +408,7 @@ function openDetail(r, keepList){
   bindRemake(dlg, r);
   state.open = r.id; writeHash();
   const cu = dlg.querySelector('[data-copy="url"]'); if(cu) cu.onclick = () => copy(r.links[0].url, '已複製網頁連結');
-  dlg.querySelectorAll('[data-prompt]').forEach(b => b.onclick = () => copy(PROMPTS[+b.dataset.prompt][1](r), '已複製提示詞，貼到 Claude 即可'));
+  dlg.querySelectorAll('[data-prompt]').forEach(b => b.onclick = () => copy(PROMPTS[+b.dataset.prompt][1](r), '已複製提示詞，貼到 ChatGPT、Gemini 或 Claude 即可'));
   if(!dlg.open){ dlg.showModal(); dlg.addEventListener('close', () => { state.open = ''; writeHash(); }, {once: true}); }
   dlg.scrollTop = 0;
 }
