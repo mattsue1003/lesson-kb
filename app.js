@@ -2,6 +2,19 @@
 'use strict';
 const DATA = (window.KB_DATA || []).map((r, i) => ({...r, _i: i, year: (r.date || '').slice(0, 4) || '未知',
   links: r.links || [], web: (r.links && r.links.length) ? '有教案網頁' : '只有臉書貼文'}));
+const REPOS = window.KB_REPOS || {};
+const OWNER = 'mattsue1003';
+// 教案網頁 → GitHub 原始檔資訊
+function repoOf(r){
+  const u = r.links.find(l => l.url.includes(OWNER + '.github.io/'));
+  if(!u) return null;
+  const name = u.url.split('github.io/')[1].split('/')[0], info = REPOS[name];
+  return info && info.m ? {name, ...info, page: u.url,
+    raw: `https://raw.githubusercontent.com/${OWNER}/${name}/${info.b}/${info.m}`,
+    zip: `https://github.com/${OWNER}/${name}/archive/refs/heads/${info.b}.zip`,
+    gh: `https://github.com/${OWNER}/${name}`} : null;
+}
+const kb = n => n < 1024 * 1024 ? Math.max(1, Math.round(n / 1024)) + ' KB' : (n / 1048576).toFixed(1) + ' MB';
 const host = u => { try{ const x = new URL(u); return x.host + x.pathname.replace(/\/$/, ''); }catch(e){ return u; } };
 const $ = s => document.querySelector(s);
 const store = {
@@ -40,12 +53,14 @@ const state = {
 function readHash(){
   const h = new URLSearchParams(location.hash.slice(1));
   state.q = h.get('q') || '';
+  state.open = h.get('id') || '';
   for(const d of DIMS){ state.sel[d.key] = new Set((h.get(d.key) || '').split('|').filter(Boolean)); }
 }
 function writeHash(){
   const h = new URLSearchParams();
   if(state.q.trim()) h.set('q', state.q.trim());
   for(const d of DIMS) if(state.sel[d.key].size) h.set(d.key, [...state.sel[d.key]].join('|'));
+  if(state.open) h.set('id', state.open);
   const str = h.toString();
   if(str !== location.hash.slice(1)) history.replaceState(null, '', str ? '#' + str : location.pathname + location.search);
 }
@@ -217,7 +232,7 @@ function renderBar(){
   }
   bar.className = 'pickbar';
   bar.innerHTML = `<b>已選 ${picks.length} 篇</b>
-    <span class="pgroup"><span class="plabel">複製給 Claude：</span>${MULTI.map((m,i) => `<button class="chip" data-pm="${i}">${m[0]}</button>`).join('')}</span>
+    <span class="pgroup"><span class="plabel">複製提示詞：</span>${MULTI.map((m,i) => `<button class="chip" data-pm="${i}">${m[0]}</button>`).join('')}</span>
     <span class="pgroup">
       <button class="btn ghost" data-pa="content">複製內容</button>
       <button class="btn" data-pa="share">連結／QR code</button>
@@ -254,6 +269,100 @@ const PROMPTS = [
   ['延伸成系列課程', r => `請以以下教案為核心，延伸設計 4 週的系列課程，每週一個主題、逐週提高難度，並附每週教具與帶領重點。\n\n${src(r)}`],
   ['做成互動簡報', r => `請根據以下教案，設計一份給長者團體使用的互動簡報大綱（約 15 頁），包含開場提問、示範、互動遊戲頁、回顧與分享。\n\n${src(r)}`],
 ];
+// ---------- 給學生：照這份教案做一份類似的 ----------
+const draft = Object.assign({topic: '', aud: '', extra: ''}, store.get('remake', {}));
+function remakeHTML(r){
+  const g = repoOf(r); if(!g) return '';
+  const multi = g.nc > 1 || g.n > 1;
+  return `<section class="remake">
+    <h3>學生：照這份教案做一份自己的</h3>
+    <ol class="steps">
+      <li><b>下載這份教案的程式檔</b>
+        <div class="row">
+          <button class="btn" data-rm="dl">下載 ${esc(g.m)}（${kb(g.ms)}）</button>
+          ${multi ? `<a class="btn ghost" href="${esc(g.zip)}" data-out>下載全部檔案 ZIP（${kb(g.ts)}）</a>` : ''}
+          <a class="btn ghost" href="${esc(g.gh)}" target="_blank" rel="noopener" data-out>在 GitHub 看程式碼 ↗</a>
+        </div>
+        ${multi ? `<p class="hint">這份教案有 ${g.n} 個檔案（含圖片、音檔或其他程式）。主程式通常就夠 AI 看懂玩法；要完整複製時再用 ZIP：ChatGPT 可以直接上傳 ZIP，Gemini 請先解壓縮再上傳裡面的檔案。</p>` : ''}
+        ${g.ms > 300000 ? `<p class="hint">檔案比較大（${kb(g.ms)}），AI 可能讀不完；可以在提示詞裡請它「先說明這份程式的結構」再改。</p>` : ''}
+      </li>
+      <li><b>寫下你想改成什麼</b>
+        <div class="fields">
+          <label>新主題<input data-f="topic" value="${esc(draft.topic)}" placeholder="例如：台灣小吃、四季水果、交通安全"></label>
+          <label>使用對象<input data-f="aud" value="${esc(draft.aud)}" placeholder="例如：輕度失智長輩、國小低年級（不填＝同原教案）"></label>
+          <label>其他要求<textarea data-f="extra" rows="2" placeholder="例如：題目改成 10 題、加上台語發音、字再放大">${esc(draft.extra)}</textarea></label>
+        </div>
+      </li>
+      <li><b>複製提示詞，打開 AI，上傳剛剛下載的檔案再貼上</b>
+        <div class="row">
+          <button class="btn" data-rm="prompt">複製提示詞</button>
+          <a class="btn ghost" href="https://chatgpt.com/" target="_blank" rel="noopener" data-out>開啟 ChatGPT ↗</a>
+          <a class="btn ghost" href="https://gemini.google.com/app" target="_blank" rel="noopener" data-out>開啟 Gemini ↗</a>
+        </div>
+        ${g.ms <= 60000 ? `<p class="hint">不想上傳檔案？按 <button class="linkbtn" data-rm="withcode">複製提示詞＋程式碼</button>，直接貼到 AI 就好（這份程式碼 ${kb(g.ms)}，貼得下）。</p>` : ''}
+      </li>
+      <li><b>把 AI 給的 HTML 存成檔案，用瀏覽器打開試玩</b>
+        <p class="hint">ChatGPT 通常會給下載連結；Gemini 可按程式碼框右上角複製，貼到記事本存成「我的教案.html」。不滿意就直接跟 AI 說哪裡要改，例如「按鈕再大一點」「第 3 題換掉」。</p>
+      </li>
+    </ol>
+  </section>`;
+}
+function remakePrompt(r, code){
+  const g = repoOf(r), t = draft.topic.trim(), a = draft.aud.trim(), x = draft.extra.trim();
+  return (code ? `以下是一份「${r.title}」互動教案網頁的完整原始碼（原網頁：${g.page}）。` : `我上傳的檔案是一份「${r.title}」互動教案網頁的原始碼（原網頁：${g.page}）。`) +
+`
+這份教案在做什麼：${r.summary || r.title}
+
+請先讀懂程式碼的玩法、版面與互動方式，再幫我做一份類似的新教案：
+・新主題：${t || '（請先問我想換成什麼主題）'}
+・使用對象：${a || '同原教案'}
+・其他要求：${x || '無'}
+
+請遵守：
+1. 保留原本的操作方式和版面風格，主要替換內容（題目、文字、說明、配色可微調）。
+2. 給我一個完整、可以直接用瀏覽器打開的單一 HTML 檔（CSS 和 JavaScript 都寫在同一個檔案裡），不要省略任何程式碼，也不要寫「其餘同上」。
+3. 原本用到的圖片或音檔如果沒辦法沿用，改用 emoji、文字或純 CSS 圖形代替，確保打開就能用。
+4. 字要大、按鈕要好按，適合教室大螢幕和手機。
+5. 最後用條列說明你改了哪些地方，以及我還可以怎麼調整。` + (code ? `\n\n===== 原始碼開始（${g.m}）=====\n${code}\n===== 原始碼結束 =====` : '');
+}
+async function fetchCode(g){
+  const res = await fetch(g.raw); if(!res.ok) throw new Error(res.status); return res.text();
+}
+function bindRemake(dlg, r){
+  const g = repoOf(r); if(!g) return;
+  dlg.querySelectorAll('[data-f]').forEach(el => el.oninput = () => { draft[el.dataset.f] = el.value; store.set('remake', draft); });
+  dlg.querySelectorAll('[data-rm]').forEach(b => b.onclick = async e => {
+    e.stopPropagation(); const k = b.dataset.rm;
+    if(k === 'prompt') return copy(remakePrompt(r), '已複製提示詞：打開 ChatGPT 或 Gemini，先上傳檔案再貼上');
+    const old = b.textContent; b.disabled = true; b.textContent = '下載中…';
+    try{
+      const code = await fetchCode(g);
+      if(k === 'dl'){ download(new Blob([code], {type: 'text/html'}), `${g.name}.html`); toast('已下載，接著到第 2、3 步'); }
+      else copy(remakePrompt(r, code), '已複製提示詞＋程式碼，直接貼到 ChatGPT 或 Gemini');
+    }catch(err){ toast('下載失敗，請改按「在 GitHub 看程式碼」'); }
+    b.disabled = false; b.textContent = old;
+  });
+}
+function openGuide(){
+  let d = $('#guideDlg');
+  if(!d){ d = document.createElement('dialog'); d.id = 'guideDlg'; document.body.appendChild(d);
+    d.addEventListener('click', e => { if(e.target === d || e.target.closest('[data-close]')) d.close(); }); }
+  const nWeb = DATA.filter(r => repoOf(r)).length;
+  d.innerHTML = `<div class="dhead"><h2>學生怎麼用這個教案庫</h2><button class="x" data-close aria-label="關閉">×</button></div>
+  <div class="dbody guide">
+    <p>這裡收集了 ${DATA.length} 份職能治療教案，其中 ${nWeb} 份是互動網頁，而且<b>每一份的程式檔都可以下載</b>。你可以把它交給 ChatGPT 或 Gemini，換成自己的主題，做出一份類似的新教案。</p>
+    <ol class="steps">
+      <li><b>找到喜歡的教案</b>：上方搜尋關鍵字（例如「猜歌」「手部」「記憶」），或用左邊的「訓練領域」「對象」篩選。</li>
+      <li><b>點開那張卡片</b>，往下捲到「學生：照這份教案做一份自己的」。</li>
+      <li><b>下載程式檔</b>，再填上想換的主題和對象。</li>
+      <li><b>按「複製提示詞」</b>，打開 ChatGPT 或 Gemini，先上傳剛剛的檔案，再貼上提示詞送出。</li>
+      <li><b>把 AI 給你的 HTML 存檔</b>，用瀏覽器打開試玩；哪裡不滿意就繼續跟 AI 說。</li>
+    </ol>
+    <p class="hint">小技巧：程式碼比較小的教案，可以按「複製提示詞＋程式碼」，不用上傳檔案，直接貼上就好。想參考好幾份教案，就勾選卡片左上角的方框，用下方工具列一起複製。</p>
+    <p><button class="btn" data-close>開始找教案</button></p>
+  </div>`;
+  d.showModal();
+}
 let navList = [];
 function openDetail(r, keepList){
   if(!keepList) navList = sorted(filtered());
@@ -278,9 +387,11 @@ function openDetail(r, keepList){
         ${r.href ? `<a class="btn ${r.links.length ? 'ghost' : ''}" href="${esc(r.href)}" target="_blank" rel="noopener">臉書原文</a>` : ''}
         ${r.links.length ? `<button class="btn ghost" data-copy="url">複製網頁連結</button>` : ''}
         <button class="btn ghost" data-copy="text">複製全文</button>
+        <button class="btn ghost" data-copy="share" title="傳給學生，打開就直接看到這篇">複製這篇的分享連結</button>
         <button class="btn ghost" data-pick="${esc(r.id)}">${isPicked(r.id) ? '✓ 已加入多選' : '＋ 加入多選'}</button>
       </div>
-      <div class="prompts"><span class="inline">複製給 Claude：</span>${PROMPTS.map((p,i) => `<button class="chip" data-prompt="${i}">${p[0]}</button>`).join('')}</div>
+      ${remakeHTML(r)}
+      <div class="prompts"><span class="inline">複製提示詞（老師備課用）：</span>${PROMPTS.map((p,i) => `<button class="chip" data-prompt="${i}">${p[0]}</button>`).join('')}</div>
       <h3 style="font-size:14px;color:var(--muted);margin:16px 0 6px">貼文全文</h3>
       ${r.img ? `<img src="${esc(r.img)}" alt="" loading="lazy" onerror="this.remove()">` : ''}
       <div class="full">${hl(r.text)}</div>
@@ -289,9 +400,12 @@ function openDetail(r, keepList){
   dlg.querySelector('[data-close]').onclick = () => dlg.close();
   dlg.querySelectorAll('[data-nav]').forEach(b => b.onclick = () => navDetail(+b.dataset.nav));
   dlg.querySelector('[data-copy="text"]').onclick = () => copy(r.text, '已複製全文');
+  dlg.querySelector('[data-copy="share"]').onclick = () => copy(location.origin + location.pathname + '#id=' + encodeURIComponent(r.id), '已複製分享連結，學生打開就會看到這篇');
+  bindRemake(dlg, r);
+  state.open = r.id; writeHash();
   const cu = dlg.querySelector('[data-copy="url"]'); if(cu) cu.onclick = () => copy(r.links[0].url, '已複製網頁連結');
   dlg.querySelectorAll('[data-prompt]').forEach(b => b.onclick = () => copy(PROMPTS[+b.dataset.prompt][1](r), '已複製提示詞，貼到 Claude 即可'));
-  if(!dlg.open) dlg.showModal();
+  if(!dlg.open){ dlg.showModal(); dlg.addEventListener('close', () => { state.open = ''; writeHash(); }, {once: true}); }
   dlg.scrollTop = 0;
 }
 function navDetail(d){
@@ -330,7 +444,11 @@ document.addEventListener('keydown', e => {
 $('#detail').addEventListener('click', e => { if(e.target === $('#detail')) $('#detail').close(); });
 let qt; $('#q').addEventListener('input', e => { clearTimeout(qt); qt = setTimeout(() => { state.q = e.target.value; state.shown = 60; update(); }, 150); });
 readHash(); $('#q').value = state.q;
-window.addEventListener('hashchange', () => { readHash(); $('#q').value = state.q; state.shown = 60; update(); });
+window.addEventListener('hashchange', () => { readHash(); $('#q').value = state.q; state.shown = 60; update(); openFromHash(); });
+function openFromHash(){
+  if(!state.open) return; const r = DATA.find(x => x.id === state.open);
+  if(r && !($('#detail').open && $('#detail [data-fav]')?.dataset.fav === r.id)) openDetail(r);
+}
 $('#sort').value = state.sort;
 $('#sort').onchange = e => { state.sort = e.target.value; store.set('sort', state.sort); renderResults(); };
 document.querySelectorAll('.seg button').forEach(b => {
@@ -512,4 +630,6 @@ function drawShare(dlg){
 }
 
 update();
+openFromHash();
+$('#guide').onclick = openGuide;
 })();
